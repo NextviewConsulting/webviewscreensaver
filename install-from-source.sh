@@ -1,5 +1,5 @@
 #!/bin/bash
-set -u
+set -euo pipefail
 
 abort() {
   printf "%s\n" "$@"
@@ -22,7 +22,7 @@ if ! command -v xcodebuild >/dev/null; then
     abort "Install process requires Xcode."
 fi
 
-GIT_REMOTE="https://github.com/liquidx/webviewscreensaver.git"
+GIT_REMOTE="https://github.com/NextviewConsulting/webviewscreensaver.git"
 DIR_NAME="webviewscreensaver"
 PRJ_NAME="WebViewScreenSaver"
 BUILD_DIR="build"
@@ -40,7 +40,8 @@ xcodebuild -project WebViewScreenSaver.xcodeproj \
  -scheme WebViewScreenSaver \
  -configuration Release clean archive \
  -archivePath "$BUILD_DIR/build.xcarchive" \
- CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=YES > "$BUILD_DIR/build.log"
+ CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=YES > "$BUILD_DIR/build.log" \
+ || abort " Failed. See $TMPDIR$DIR_NAME/$PRJ_NAME/$BUILD_DIR/build.log"
 printf ' Done\n'
 
 printf 'Installing %s...' "$PRJ_NAME"
