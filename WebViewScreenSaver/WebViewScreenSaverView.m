@@ -188,8 +188,12 @@ NSNotificationName const WVSSPreviewStopped = @"webviewscreensaver.preview.stopp
 
 #pragma mark ScreenSaverView
 
-+ (WKWebView *)makeWebView:(NSRect)frame {
++ (WKWebView *)makeWebView:(NSRect)frame persistentWebsiteData:(BOOL)persistent {
   WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
+  // By default nothing (cookies, logins, local storage) is kept between runs, so a
+  // session signed in on the screensaver does not stay signed in indefinitely.
+  configuration.websiteDataStore =
+      persistent ? WKWebsiteDataStore.defaultDataStore : WKWebsiteDataStore.nonPersistentDataStore;
   WKPreferences *preferences = [[WKPreferences alloc] init];
   preferences.javaScriptCanOpenWindowsAutomatically = NO;
   configuration.preferences = preferences;
@@ -212,7 +216,8 @@ NSNotificationName const WVSSPreviewStopped = @"webviewscreensaver.preview.stopp
   if (self.isPreview || _webView) return;
 
   // Create the webview for the screensaver.
-  _webView = [self.class makeWebView:self.bounds];
+  _webView = [self.class makeWebView:self.bounds
+                persistentWebsiteData:_config.persistWebsiteData];
   _webView.UIDelegate = self;
   _webView.navigationDelegate = self;
   // Sonoma ScreenSaverEngine view hierarchy occludes webview pausing animations and JS.
@@ -334,7 +339,23 @@ NSNotificationName const WVSSPreviewStopped = @"webviewscreensaver.preview.stopp
   // Don't open new windows.
   if (navigationAction.targetFrame == nil) {
     decisionHandler(WKNavigationActionPolicyCancel);
+    return;
   }
+
+  // Only allow web and local content. Blocks pages from launching other apps through
+  // custom URL schemes (e.g. zoommtg:, mailto:, x-apple.systempreferences:).
+  static NSSet<NSString *> *allowedSchemes;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    allowedSchemes = [NSSet setWithObjects:@"https", @"http", @"file", @"about", @"data", @"blob", nil];
+  });
+  NSString *scheme = navigationAction.request.URL.scheme.lowercaseString;
+  if (scheme == nil || ![allowedSchemes containsObject:scheme]) {
+    WVSSLog(@"Blocked navigation to scheme: %@", scheme);
+    decisionHandler(WKNavigationActionPolicyCancel);
+    return;
+  }
+
   decisionHandler(WKNavigationActionPolicyAllow);
 }
 

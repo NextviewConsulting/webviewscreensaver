@@ -202,7 +202,10 @@ static NSString *const kTableColumnPreview = @"preview";
     writeRowsWithIndexes:(NSIndexSet *)rowIndexes
             toPasteboard:(NSPasteboard *)pboard {
   // Copy the row numbers to the pasteboard.
-  NSData *serializedIndexes = [NSKeyedArchiver archivedDataWithRootObject:rowIndexes];
+  NSData *serializedIndexes = [NSKeyedArchiver archivedDataWithRootObject:rowIndexes
+                                                    requiringSecureCoding:YES
+                                                                    error:nil];
+  if (serializedIndexes == nil) return NO;
   [pboard declareTypes:[NSArray arrayWithObject:kURLTableRow] owner:self];
   [pboard setData:serializedIndexes forType:kURLTableRow];
   return YES;
@@ -222,10 +225,16 @@ static NSString *const kTableColumnPreview = @"preview";
     dropOperation:(NSTableViewDropOperation)operation {
   NSPasteboard *pboard = [info draggingPasteboard];
   NSData *rowData = [pboard dataForType:kURLTableRow];
-  NSIndexSet *rowIndexes = [NSKeyedUnarchiver unarchiveObjectWithData:rowData];
-  NSInteger dragRow = [rowIndexes firstIndex];
+  if (rowData == nil) return NO;
+  // Secure decoding: only an NSIndexSet is accepted from the pasteboard.
+  NSIndexSet *rowIndexes = [NSKeyedUnarchiver unarchivedObjectOfClass:NSIndexSet.class
+                                                             fromData:rowData
+                                                                error:nil];
+  if (rowIndexes.count == 0) return NO;
+  NSUInteger dragRow = rowIndexes.firstIndex;
 
   NSMutableArray *addresses = self.config.addresses;
+  if (dragRow >= addresses.count || row < 0 || (NSUInteger)row > addresses.count) return NO;
   id draggedObject = [addresses objectAtIndex:dragRow];
 
   if (dragRow < row) {
@@ -291,7 +300,8 @@ static NSString *const kTableColumnPreview = @"preview";
                                     backing:NSBackingStoreBuffered
                                       defer:YES];
 
-  WKWebView *webView = [WebViewScreenSaverView makeWebView:bounds];
+  WKWebView *webView = [WebViewScreenSaverView makeWebView:bounds
+                                     persistentWebsiteData:self.config.persistWebsiteData];
   [window.contentView addSubview:webView];
 
   [[[NSWindowController alloc] initWithWindow:window] showWindow:window];

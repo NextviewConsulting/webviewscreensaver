@@ -28,6 +28,8 @@
 static NSString *const kScreenSaverFetchURLsKey = @"kScreenSaverFetchURLs";  // BOOL
 static NSString *const kScreenSaverURLsURLKey = @"kScreenSaverURLsURL";      // NSString (URL)
 static NSString *const kScreenSaverURLListKey = @"kScreenSaverURLList";  // NSArray of NSDictionary
+static NSString *const kScreenSaverPersistWebsiteDataKey =
+    @"kScreenSaverPersistWebsiteData";  // BOOL, default NO
 
 @interface WVSSConfig () <WVSSAddressListFetcherDelegate>
 @property(nonatomic, strong) NSUserDefaults *userDefaults;
@@ -46,6 +48,7 @@ static NSString *const kScreenSaverURLListKey = @"kScreenSaverURLList";  // NSAr
     self.addresses = [self loadAddressesFromUserDefaults:userDefaults];
     self.addressListURL = [userDefaults stringForKey:kScreenSaverURLsURLKey];
     self.shouldFetchAddressList = [userDefaults boolForKey:kScreenSaverFetchURLsKey];
+    self.persistWebsiteData = [userDefaults boolForKey:kScreenSaverPersistWebsiteDataKey];
 
     // NSLog(@"Loaded Addresses: %@", self.addresses);
 
@@ -114,7 +117,13 @@ static NSString *const kScreenSaverURLListKey = @"kScreenSaverURLList";  // NSAr
 
   NSString *addressFetchURL = self.addressListURL;
   if (!addressFetchURL.length) return;
-  if (!([addressFetchURL hasPrefix:@"http://"] || [addressFetchURL hasPrefix:@"https://"])) return;
+
+  // Only fetch the list over HTTPS so it cannot be swapped in transit.
+  NSURL *listURL = [NSURL URLWithString:addressFetchURL];
+  if (![listURL.scheme.lowercaseString isEqualToString:@"https"] || listURL.host.length == 0) {
+    WVSSLog(@"Ignoring address list URL: only https:// URLs are allowed");
+    return;
+  }
 
   _fetcher = [[WVSSAddressListFetcher alloc] initWithURL:addressFetchURL];
   _fetcher.delegate = self;
@@ -123,7 +132,8 @@ static NSString *const kScreenSaverURLListKey = @"kScreenSaverURLList";  // NSAr
 #pragma mark - WVSSAddressListFetcherDelegate
 
 - (void)addressListFetcher:(WVSSAddressListFetcher *)fetcher didFailWithError:(NSError *)error {
-  WVSSLog(@"Encountered issue: %@", error.localizedDescription);
+  // Log domain/code only: the description can contain the list URL (and any token in it).
+  WVSSLog(@"Fetching address list failed: %@ (%ld)", error.domain, (long)error.code);
 }
 
 - (void)addressListFetcher:(WVSSAddressListFetcher *)fetcher

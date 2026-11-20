@@ -37,22 +37,46 @@ NSExceptionName const WVSSInvalidArgumentException = @"WVSSInvalidArgumentExcept
   self = [super init];
   if (self) {
     NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:url]];
-    _task = [NSURLSession.sharedSession
+    // Ephemeral session: no cookies or cache shared with the rest of the process.
+    NSURLSession *session = [NSURLSession
+        sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration];
+    _task = [session
         dataTaskWithRequest:request
           completionHandler:^(NSData *_Nullable data, NSURLResponse *_Nullable response,
                               NSError *_Nullable error) {
             dispatch_async(dispatch_get_main_queue(), ^{
-              [self didFinishLoading:data error:error];
+              [self didFinishLoading:data response:response error:error];
             });
           }];
     [_task resume];
+    [session finishTasksAndInvalidate];
   }
   return self;
 }
 
-- (void)didFinishLoading:(NSData *)data error:(NSError *)error {
++ (BOOL)isAllowedAddressURL:(NSString *)urlString {
+  NSURL *url = [NSURL URLWithString:urlString];
+  return [url.scheme.lowercaseString isEqualToString:@"https"] && url.host.length > 0;
+}
+
+- (void)didFinishLoading:(NSData *)data
+                response:(NSURLResponse *)urlResponse
+                   error:(NSError *)error {
   if (error != nil) {
     [self.delegate addressListFetcher:self didFailWithError:error];
+    return;
+  }
+
+  // Reject non-200 answers and redirects that ended up off HTTPS.
+  NSHTTPURLResponse *httpResponse =
+      [urlResponse isKindOfClass:NSHTTPURLResponse.class] ? (NSHTTPURLResponse *)urlResponse : nil;
+  if (httpResponse.statusCode != 200 ||
+      ![httpResponse.URL.scheme.lowercaseString isEqualToString:@"https"] || data == nil) {
+    NSError *responseError = [NSError
+        errorWithDomain:WVSSInvalidArgumentException
+                   code:httpResponse.statusCode
+               userInfo:@{NSLocalizedDescriptionKey : @"Unexpected address list response"}];
+    [self.delegate addressListFetcher:self didFailWithError:responseError];
     return;
   }
 
@@ -66,6 +90,7 @@ NSExceptionName const WVSSInvalidArgumentException = @"WVSSInvalidArgumentExcept
   }
 
   NSMutableArray *parsed = [[NSMutableArray alloc] init];
+  NSUInteger skipped = 0;
 
   @try {
     expectClass(response, NSArray.class);
@@ -78,7 +103,18 @@ NSExceptionName const WVSSInvalidArgumentException = @"WVSSInvalidArgumentExcept
       expectClass(url, NSString.class);
       expectClass(duration, NSNumber.class);
 
+      // A remote list may only point at HTTPS pages: no plain HTTP, no file:// or
+      // scheme-less entries that would load files from this Mac.
+      if (![self.class isAllowedAddressURL:url]) {
+        skipped++;
+        continue;
+      }
+
       [parsed addObject:[WVSSAddress addressWithURL:url duration:[(NSNumber *)duration intValue]]];
+    }
+
+    if (skipped > 0) {
+      WVSSLog(@"Skipped %lu non-https entries from address list", (unsigned long)skipped);
     }
 
     [self.delegate addressListFetcher:self didFinishWithArray:parsed];

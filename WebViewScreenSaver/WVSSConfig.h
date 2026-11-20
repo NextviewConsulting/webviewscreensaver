@@ -28,6 +28,8 @@
 @property(nonatomic, strong, readonly) NSMutableArray *addresses;
 @property(nonatomic, strong) NSString *addressListURL;
 @property(nonatomic, assign) BOOL shouldFetchAddressList;
+// Keep cookies/logins between runs. Off by default; set via `defaults` (see README).
+@property(nonatomic, assign) BOOL persistWebsiteData;
 
 - (instancetype)initWithUserDefaults:(NSUserDefaults *)userDefaults;
 - (void)synchronize;
