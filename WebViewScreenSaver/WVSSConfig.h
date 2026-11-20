@@ -25,7 +25,12 @@
 
 @interface WVSSConfig : NSObject
 
+// The user's own list, edited in the settings sheet and saved to user defaults.
 @property(nonatomic, strong, readonly) NSMutableArray *addresses;
+// The last list downloaded from addressListURL. Never saved over `addresses`.
+@property(nonatomic, copy, readonly) NSArray *fetchedAddresses;
+// YES while an address list download is in progress.
+@property(nonatomic, assign, readonly, getter=isFetching) BOOL fetching;
 @property(nonatomic, strong) NSString *addressListURL;
 @property(nonatomic, assign) BOOL shouldFetchAddressList;
 // Keep cookies/logins between runs. Off by default; set via `defaults` (see README).
@@ -34,5 +39,9 @@
 - (instancetype)initWithUserDefaults:(NSUserDefaults *)userDefaults;
 - (void)synchronize;
 - (void)fetchIfNeeded;
+
+// The list the screensaver should show: the fetched list when fetching is on and a
+// list has arrived, otherwise the user's own list.
+- (NSArray *)activeAddresses;
 
 @end

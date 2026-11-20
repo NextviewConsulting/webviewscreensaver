@@ -37,8 +37,9 @@
                                                                  create:YES
                                                                   error:nil];
     NSURL *logsURL = [libraryURL URLByAppendingPathComponent:@"Logs"];
-    NSURL *appLogsURL =
-        [logsURL URLByAppendingPathComponent:[[NSBundle mainBundle] bundleIdentifier]];
+    // Command-line hosts (e.g. the unit test runner) have no bundle identifier.
+    NSString *bundleID = NSBundle.mainBundle.bundleIdentifier ?: @"WebViewScreenSaver";
+    NSURL *appLogsURL = [logsURL URLByAppendingPathComponent:bundleID];
 
     defaultLogger = [[self alloc] initWithLogDirectory:appLogsURL.path
                                            logFileName:@"wvss.log"

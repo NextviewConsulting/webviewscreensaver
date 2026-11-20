@@ -203,8 +203,13 @@ NSNotificationName const WVSSPreviewStopped = @"webviewscreensaver.preview.stopp
 
   NSColor *color = [NSColor colorWithCalibratedWhite:0.0 alpha:1.0];
   webView.layer.backgroundColor = color.CGColor;
-  [webView setValue:@(YES)
-             forKey:@"drawsTransparentBackground"];  // Deprecated and internal but works
+  // Undocumented WebKit key. Setting an unknown key throws, so a future macOS that
+  // drops it must not crash the screensaver: fall back to the default background.
+  @try {
+    [webView setValue:@(YES) forKey:@"drawsTransparentBackground"];
+  } @catch (NSException *exception) {
+    NSLog(@"WebViewScreenSaver: drawsTransparentBackground unavailable (%@)", exception.name);
+  }
 
   return webView;
 }
@@ -271,8 +276,9 @@ NSNotificationName const WVSSPreviewStopped = @"webviewscreensaver.preview.stopp
   [_timer invalidate];
   _timer = nil;
 
-  if (address.duration < 0) return;  // Infinite
-  _timer = [NSTimer scheduledTimerWithTimeInterval:address.duration
+  NSTimeInterval duration = address.effectiveDuration;
+  if (duration < 0) return;  // Infinite
+  _timer = [NSTimer scheduledTimerWithTimeInterval:duration
                                             target:self
                                           selector:@selector(loadNext:)
                                           userInfo:nil
@@ -303,11 +309,11 @@ NSNotificationName const WVSSPreviewStopped = @"webviewscreensaver.preview.stopp
 }
 
 - (NSUInteger)numberOfAddresses {
-  return _config.addresses.count;
+  return _config.activeAddresses.count;
 }
 
 - (WVSSAddress *)addressForIndex:(NSInteger)index {
-  return [_config.addresses objectAtIndex:index];
+  return [_config.activeAddresses objectAtIndex:index];
 }
 
 - (void)animateOneFrame {
