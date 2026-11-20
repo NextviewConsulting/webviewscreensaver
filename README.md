@@ -80,5 +80,14 @@ Things the code cannot fix for you:
 * The screensaver also runs while the Mac is **locked**, so anyone near the screen can read the page. Do not show confidential or client data.
 * Pages run with full JavaScript. Only add sites you trust.
 
+## Development
+
+Run the unit tests (requires Xcode):
+``` bash
+./Tests/run-tests.sh
+```
+
+CI runs them on every push before building.
+
 ## License
 Code is licensed under the [Apache License, Version 2.0 License](LICENSE.md).
