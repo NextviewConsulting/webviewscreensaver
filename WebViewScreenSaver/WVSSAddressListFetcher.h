@@ -21,7 +21,7 @@
 
 #import <Foundation/Foundation.h>
 
-extern NSExceptionName const WVSSInvalidArgumentException;
+extern NSErrorDomain const WVSSAddressListErrorDomain;
 
 @protocol WVSSAddressListFetcherDelegate;
 
@@ -29,6 +29,19 @@ extern NSExceptionName const WVSSInvalidArgumentException;
 @property(nonatomic, weak) id<WVSSAddressListFetcherDelegate> delegate;
 
 - (id)initWithURL:(NSString *)url;
+
+// YES for https:// URLs with a host. Remote lists may only contain these.
++ (BOOL)isAllowedAddressURL:(NSString *)urlString;
+
+// YES for an HTTP 200 response whose final URL (after redirects) is https://.
++ (BOOL)isAcceptableResponse:(NSURLResponse *)response;
+
+// Parses a JSON list of {"url": String, "duration": Number} objects into WVSSAddress
+// objects, dropping entries that fail isAllowedAddressURL:. `skipped` (optional) gets
+// the number of dropped entries. Returns nil and sets `error` if the JSON is malformed.
++ (NSArray *)addressesFromJSONData:(NSData *)data
+                           skipped:(NSUInteger *)skipped
+                             error:(NSError **)error;
 @end
 
 @protocol WVSSAddressListFetcherDelegate <NSObject>

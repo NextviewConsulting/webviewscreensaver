@@ -13,7 +13,15 @@ fi
 
 pushd "$PRJ_DIR"
 xcodebuild -project WebViewScreenSaver.xcodeproj -scheme WebViewScreenSaver -configuration Release clean archive -archivePath "$BUILD_DIR/build.xcarchive" CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO
-codesign --sign - --force "$(find "$BUILD_DIR" -iname "*.saver")"
+# Ad-hoc signed by default. Once an Apple Developer ID is available, set SIGN_IDENTITY
+# (e.g. "Developer ID Application: Nextview Consulting (TEAMID)") to sign with the
+# hardened runtime and a secure timestamp, which notarization requires.
+SIGN_IDENTITY="${SIGN_IDENTITY:--}"
+if [ "$SIGN_IDENTITY" = "-" ]; then
+  codesign --sign - --force "$(find "$BUILD_DIR" -iname "*.saver")"
+else
+  codesign --sign "$SIGN_IDENTITY" --force --options runtime --timestamp "$(find "$BUILD_DIR" -iname "*.saver")"
+fi
 
 ln -s "$(find "$BUILD_DIR" -iname "*.saver")" "$PKG_DIR"
 rm -f "../$ARTIFACT"

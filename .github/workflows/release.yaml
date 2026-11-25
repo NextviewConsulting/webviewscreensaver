@@ -5,12 +5,17 @@ on:
     tags:
       - v*
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-15
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      with:
+        persist-credentials: false
     - name: build
       run: |
         VERSION=${GITHUB_REF_NAME#v} ./archive.sh
@@ -18,7 +23,7 @@ jobs:
         DEVELOPER_DIR: /Applications/Xcode_26.0.app/Contents/Developer
 
     - name: 'Store Artifact'
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
       with:
         name: WebViewScreenSaver.saver
         path: WebViewScreenSaver.saver.zip

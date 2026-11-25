@@ -28,10 +28,13 @@
 static NSString *const kScreenSaverFetchURLsKey = @"kScreenSaverFetchURLs";  // BOOL
 static NSString *const kScreenSaverURLsURLKey = @"kScreenSaverURLsURL";      // NSString (URL)
 static NSString *const kScreenSaverURLListKey = @"kScreenSaverURLList";  // NSArray of NSDictionary
+static NSString *const kScreenSaverPersistWebsiteDataKey =
+    @"kScreenSaverPersistWebsiteData";  // BOOL, default NO
 
 @interface WVSSConfig () <WVSSAddressListFetcherDelegate>
 @property(nonatomic, strong) NSUserDefaults *userDefaults;
 @property(nonatomic, strong) NSMutableArray *addresses;
+@property(nonatomic, copy) NSArray *fetchedAddresses;
 @end
 
 @implementation WVSSConfig {
@@ -46,13 +49,8 @@ static NSString *const kScreenSaverURLListKey = @"kScreenSaverURLList";  // NSAr
     self.addresses = [self loadAddressesFromUserDefaults:userDefaults];
     self.addressListURL = [userDefaults stringForKey:kScreenSaverURLsURLKey];
     self.shouldFetchAddressList = [userDefaults boolForKey:kScreenSaverFetchURLsKey];
+    self.persistWebsiteData = [userDefaults boolForKey:kScreenSaverPersistWebsiteDataKey];
 
-    // NSLog(@"Loaded Addresses: %@", self.addresses);
-
-    if (!self.addresses) {
-      self.addresses = [NSMutableArray array];
-    }
-    
     [self appendSampleAddressIfEmpty];
     [self fetchIfNeeded];
   }
@@ -87,8 +85,6 @@ static NSString *const kScreenSaverURLListKey = @"kScreenSaverURLList";  // NSAr
   for (WVSSAddress *address in self.addresses) {
     [addressesForUserDefaults addObject:[address dictionaryRepresentation]];
   }
-  // NSLog(@"Saved Addresses: %@", addressesForUserDefaults);
-
   [userDefaults setObject:addressesForUserDefaults forKey:kScreenSaverURLListKey];
 }
 
@@ -109,12 +105,31 @@ static NSString *const kScreenSaverURLListKey = @"kScreenSaverURLList";  // NSAr
   [self.addresses addObject:address];
 }
 
+- (NSArray *)activeAddresses {
+  if (self.shouldFetchAddressList && self.fetchedAddresses != nil) {
+    return self.fetchedAddresses;
+  }
+  return self.addresses;
+}
+
+- (BOOL)isFetching {
+  return _fetcher != nil;
+}
+
 - (void)fetchIfNeeded {
   if (!self.shouldFetchAddressList) return;
+  // One download at a time; the next cycle will try again.
+  if (_fetcher != nil) return;
 
   NSString *addressFetchURL = self.addressListURL;
   if (!addressFetchURL.length) return;
-  if (!([addressFetchURL hasPrefix:@"http://"] || [addressFetchURL hasPrefix:@"https://"])) return;
+
+  // Only fetch the list over HTTPS so it cannot be swapped in transit.
+  NSURL *listURL = [NSURL URLWithString:addressFetchURL];
+  if (![listURL.scheme.lowercaseString isEqualToString:@"https"] || listURL.host.length == 0) {
+    WVSSLog(@"Ignoring address list URL: only https:// URLs are allowed");
+    return;
+  }
 
   _fetcher = [[WVSSAddressListFetcher alloc] initWithURL:addressFetchURL];
   _fetcher.delegate = self;
@@ -123,13 +138,16 @@ static NSString *const kScreenSaverURLListKey = @"kScreenSaverURLList";  // NSAr
 #pragma mark - WVSSAddressListFetcherDelegate
 
 - (void)addressListFetcher:(WVSSAddressListFetcher *)fetcher didFailWithError:(NSError *)error {
-  WVSSLog(@"Encountered issue: %@", error.localizedDescription);
+  // Log domain/code only: the description can contain the list URL (and any token in it).
+  WVSSLog(@"Fetching address list failed: %@ (%ld)", error.domain, (long)error.code);
+  _fetcher = nil;
 }
 
 - (void)addressListFetcher:(WVSSAddressListFetcher *)fetcher
         didFinishWithArray:(NSArray *)response {
-  [self.addresses removeAllObjects];
-  [self.addresses addObjectsFromArray:response];
+  // Kept apart from the user's own list so saving settings never overwrites it.
+  self.fetchedAddresses = response;
+  _fetcher = nil;
 }
 
 @end

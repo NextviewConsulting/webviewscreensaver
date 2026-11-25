@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>WVSSDefaultAddressURL</key>
-	<string>http://www.google.com/</string>
+	<string>https://www.google.com/</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>English</string>
 	<key>CFBundleExecutable</key>

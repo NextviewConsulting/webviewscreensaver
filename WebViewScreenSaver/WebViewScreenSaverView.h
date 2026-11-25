@@ -34,7 +34,7 @@
 
 @property(nonatomic, strong) WVSSConfigController *configController;
 
-+ (WKWebView *)makeWebView:(NSRect)frame;
++ (WKWebView *)makeWebView:(NSRect)frame persistentWebsiteData:(BOOL)persistent;
 + (void)loadAddress:(WVSSAddress *)address target:(WKWebView *)webView;
 
 - (id)initWithFrame:(NSRect)frame isPreview:(BOOL)isPreview prefsStore:(NSUserDefaults *)prefs;

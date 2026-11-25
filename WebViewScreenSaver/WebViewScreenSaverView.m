@@ -188,8 +188,12 @@ NSNotificationName const WVSSPreviewStopped = @"webviewscreensaver.preview.stopp
 
 #pragma mark ScreenSaverView
 
-+ (WKWebView *)makeWebView:(NSRect)frame {
++ (WKWebView *)makeWebView:(NSRect)frame persistentWebsiteData:(BOOL)persistent {
   WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
+  // By default nothing (cookies, logins, local storage) is kept between runs, so a
+  // session signed in on the screensaver does not stay signed in indefinitely.
+  configuration.websiteDataStore =
+      persistent ? WKWebsiteDataStore.defaultDataStore : WKWebsiteDataStore.nonPersistentDataStore;
   WKPreferences *preferences = [[WKPreferences alloc] init];
   preferences.javaScriptCanOpenWindowsAutomatically = NO;
   configuration.preferences = preferences;
@@ -199,8 +203,13 @@ NSNotificationName const WVSSPreviewStopped = @"webviewscreensaver.preview.stopp
 
   NSColor *color = [NSColor colorWithCalibratedWhite:0.0 alpha:1.0];
   webView.layer.backgroundColor = color.CGColor;
-  [webView setValue:@(YES)
-             forKey:@"drawsTransparentBackground"];  // Deprecated and internal but works
+  // Undocumented WebKit key. Setting an unknown key throws, so a future macOS that
+  // drops it must not crash the screensaver: fall back to the default background.
+  @try {
+    [webView setValue:@(YES) forKey:@"drawsTransparentBackground"];
+  } @catch (NSException *exception) {
+    NSLog(@"WebViewScreenSaver: drawsTransparentBackground unavailable (%@)", exception.name);
+  }
 
   return webView;
 }
@@ -212,7 +221,8 @@ NSNotificationName const WVSSPreviewStopped = @"webviewscreensaver.preview.stopp
   if (self.isPreview || _webView) return;
 
   // Create the webview for the screensaver.
-  _webView = [self.class makeWebView:self.bounds];
+  _webView = [self.class makeWebView:self.bounds
+                persistentWebsiteData:_config.persistWebsiteData];
   _webView.UIDelegate = self;
   _webView.navigationDelegate = self;
   // Sonoma ScreenSaverEngine view hierarchy occludes webview pausing animations and JS.
@@ -266,8 +276,9 @@ NSNotificationName const WVSSPreviewStopped = @"webviewscreensaver.preview.stopp
   [_timer invalidate];
   _timer = nil;
 
-  if (address.duration < 0) return;  // Infinite
-  _timer = [NSTimer scheduledTimerWithTimeInterval:address.duration
+  NSTimeInterval duration = address.effectiveDuration;
+  if (duration < 0) return;  // Infinite
+  _timer = [NSTimer scheduledTimerWithTimeInterval:duration
                                             target:self
                                           selector:@selector(loadNext:)
                                           userInfo:nil
@@ -298,11 +309,11 @@ NSNotificationName const WVSSPreviewStopped = @"webviewscreensaver.preview.stopp
 }
 
 - (NSUInteger)numberOfAddresses {
-  return _config.addresses.count;
+  return _config.activeAddresses.count;
 }
 
 - (WVSSAddress *)addressForIndex:(NSInteger)index {
-  return [_config.addresses objectAtIndex:index];
+  return [_config.activeAddresses objectAtIndex:index];
 }
 
 - (void)animateOneFrame {
@@ -334,7 +345,23 @@ NSNotificationName const WVSSPreviewStopped = @"webviewscreensaver.preview.stopp
   // Don't open new windows.
   if (navigationAction.targetFrame == nil) {
     decisionHandler(WKNavigationActionPolicyCancel);
+    return;
   }
+
+  // Only allow web and local content. Blocks pages from launching other apps through
+  // custom URL schemes (e.g. zoommtg:, mailto:, x-apple.systempreferences:).
+  static NSSet<NSString *> *allowedSchemes;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    allowedSchemes = [NSSet setWithObjects:@"https", @"http", @"file", @"about", @"data", @"blob", nil];
+  });
+  NSString *scheme = navigationAction.request.URL.scheme.lowercaseString;
+  if (scheme == nil || ![allowedSchemes containsObject:scheme]) {
+    WVSSLog(@"Blocked navigation to scheme: %@", scheme);
+    decisionHandler(WKNavigationActionPolicyCancel);
+    return;
+  }
+
   decisionHandler(WKNavigationActionPolicyAllow);
 }
 

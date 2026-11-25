@@ -24,6 +24,9 @@
 
 static NSTimeInterval const kDefaultDuration = 5 * 60.0;
 static NSString *const kScreenSaverDefaultURLKey = @"WVSSDefaultAddressURL";
+static NSString *const kFallbackDefaultURL = @"https://www.google.com/";
+
+NSTimeInterval const kWVSSMinimumDuration = 5.0;
 
 // Keys for the dictionaries in kScreenSaverURLList - string values should not be changed.
 NSString *const kWVSSAddressURLKey = @"kScreenSaverURL";
@@ -47,7 +50,9 @@ NSString *const kWVSSAddressTimeKey = @"kScreenSaverTime";
   // Using bundleForClass: to target the correct bundle which is different when loading the
   // screensaver
   NSDictionary *info = [[NSBundle bundleForClass:[self class]] infoDictionary];
-  return [info valueForKey:kScreenSaverDefaultURLKey];
+  NSString *url = [info valueForKey:kScreenSaverDefaultURLKey];
+  // A nil URL would crash dictionaryRepresentation when settings are saved.
+  return url.length ? url : kFallbackDefaultURL;
 }
 
 + (NSInteger)defaultDuration {
@@ -56,6 +61,11 @@ NSString *const kWVSSAddressTimeKey = @"kScreenSaverTime";
 
 - (NSDictionary *)dictionaryRepresentation {
   return @{kWVSSAddressURLKey : self.url, kWVSSAddressTimeKey : @(self.duration)};
+}
+
+- (NSTimeInterval)effectiveDuration {
+  if (self.duration < 0) return -1;
+  return MAX((NSTimeInterval)self.duration, kWVSSMinimumDuration);
 }
 
 - (NSString *)description {

@@ -24,6 +24,10 @@
 extern NSString *const kWVSSAddressURLKey;
 extern NSString *const kWVSSAddressTimeKey;
 
+// Shortest time a page is shown before moving on. Stops a duration of 0 (a typo or a
+// bad remote list) from reloading pages in a tight loop.
+extern NSTimeInterval const kWVSSMinimumDuration;
+
 @interface WVSSAddress : NSObject
 @property(nonatomic, strong) NSString *url;
 @property(nonatomic, assign) NSInteger duration;
@@ -35,5 +39,9 @@ extern NSString *const kWVSSAddressTimeKey;
 + (WVSSAddress *)defaultAddress;
 
 - (NSDictionary *)dictionaryRepresentation;
+
+// Seconds to show this address: a negative duration means forever (returns -1),
+// anything else is at least kWVSSMinimumDuration.
+- (NSTimeInterval)effectiveDuration;
 
 @end

@@ -23,7 +23,7 @@
 #import "WVSSAddress.h"
 #import "WVSSLog.h"
 
-NSExceptionName const WVSSInvalidArgumentException = @"WVSSInvalidArgumentException";
+NSErrorDomain const WVSSAddressListErrorDomain = @"WVSSAddressListErrorDomain";
 
 @interface WVSSAddressListFetcher () {
   NSURLSessionTask *_task;
@@ -37,75 +37,123 @@ NSExceptionName const WVSSInvalidArgumentException = @"WVSSInvalidArgumentExcept
   self = [super init];
   if (self) {
     NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:url]];
-    _task = [NSURLSession.sharedSession
+    // Ephemeral session: no cookies or cache shared with the rest of the process.
+    NSURLSession *session = [NSURLSession
+        sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration];
+    _task = [session
         dataTaskWithRequest:request
           completionHandler:^(NSData *_Nullable data, NSURLResponse *_Nullable response,
                               NSError *_Nullable error) {
             dispatch_async(dispatch_get_main_queue(), ^{
-              [self didFinishLoading:data error:error];
+              [self didFinishLoading:data response:response error:error];
             });
           }];
     [_task resume];
+    [session finishTasksAndInvalidate];
   }
   return self;
 }
 
-- (void)didFinishLoading:(NSData *)data error:(NSError *)error {
++ (BOOL)isAllowedAddressURL:(NSString *)urlString {
+  if (![urlString isKindOfClass:NSString.class]) return NO;
+  NSURL *url = [NSURL URLWithString:urlString];
+  return [url.scheme.lowercaseString isEqualToString:@"https"] && url.host.length > 0;
+}
+
++ (BOOL)isAcceptableResponse:(NSURLResponse *)response {
+  if (![response isKindOfClass:NSHTTPURLResponse.class]) return NO;
+  NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
+  return httpResponse.statusCode == 200 &&
+         [httpResponse.URL.scheme.lowercaseString isEqualToString:@"https"];
+}
+
++ (NSError *)errorWithReason:(NSString *)reason {
+  return [NSError errorWithDomain:WVSSAddressListErrorDomain
+                             code:-1
+                         userInfo:@{NSLocalizedDescriptionKey : reason}];
+}
+
++ (NSArray *)addressesFromJSONData:(NSData *)data
+                           skipped:(NSUInteger *)skipped
+                             error:(NSError **)error {
+  if (skipped) *skipped = 0;
+  if (data == nil) {
+    if (error) *error = [self errorWithReason:@"No data"];
+    return nil;
+  }
+
+  NSError *jsonError = nil;
+  id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
+  if (json == nil) {
+    if (error) *error = jsonError;
+    return nil;
+  }
+  if (![json isKindOfClass:NSArray.class]) {
+    if (error) *error = [self errorWithReason:@"Expected a JSON array"];
+    return nil;
+  }
+
+  NSMutableArray *parsed = [NSMutableArray array];
+  NSUInteger skippedCount = 0;
+  for (id item in (NSArray *)json) {
+    if (![item isKindOfClass:NSDictionary.class]) {
+      if (error) *error = [self errorWithReason:@"Expected each entry to be an object"];
+      return nil;
+    }
+    id url = item[@"url"];
+    id duration = item[@"duration"];
+    if (![url isKindOfClass:NSString.class] || ![duration isKindOfClass:NSNumber.class]) {
+      if (error) *error = [self errorWithReason:@"Expected a string url and a number duration"];
+      return nil;
+    }
+
+    // A remote list may only point at HTTPS pages: no plain HTTP, no file:// or
+    // scheme-less entries that would load files from this Mac.
+    if (![self isAllowedAddressURL:url]) {
+      skippedCount++;
+      continue;
+    }
+    [parsed addObject:[WVSSAddress addressWithURL:url
+                                         duration:[(NSNumber *)duration integerValue]]];
+  }
+
+  if (skipped) *skipped = skippedCount;
+  return parsed;
+}
+
+- (void)didFinishLoading:(NSData *)data
+                response:(NSURLResponse *)response
+                   error:(NSError *)error {
   if (error != nil) {
     [self.delegate addressListFetcher:self didFailWithError:error];
     return;
   }
 
-  NSError *jsonError = nil;
-  id response = [NSJSONSerialization JSONObjectWithData:data
-                                                options:NSJSONReadingMutableContainers
-                                                  error:&jsonError];
-  if (jsonError) {
-    [self.delegate addressListFetcher:self didFailWithError:jsonError];
+  // Reject non-200 answers and redirects that ended up off HTTPS.
+  if (![self.class isAcceptableResponse:response]) {
+    NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class]
+                           ? ((NSHTTPURLResponse *)response).statusCode
+                           : 0;
+    NSError *responseError =
+        [NSError errorWithDomain:WVSSAddressListErrorDomain
+                            code:status
+                        userInfo:@{NSLocalizedDescriptionKey : @"Unexpected address list response"}];
+    [self.delegate addressListFetcher:self didFailWithError:responseError];
     return;
   }
 
-  NSMutableArray *parsed = [[NSMutableArray alloc] init];
-
-  @try {
-    expectClass(response, NSArray.class);
-    for (NSDictionary *item in (NSArray *)response) {
-      expectClass(item, NSDictionary.class);
-
-      id url = item[@"url"];
-      id duration = item[@"duration"];
-
-      expectClass(url, NSString.class);
-      expectClass(duration, NSNumber.class);
-
-      [parsed addObject:[WVSSAddress addressWithURL:url duration:[(NSNumber *)duration intValue]]];
-    }
-
-    [self.delegate addressListFetcher:self didFinishWithArray:parsed];
-  } @catch (NSException *exception) {
-    if ([exception.name isEqualToString:WVSSInvalidArgumentException]) {
-      NSError *error = [NSError errorWithDomain:WVSSInvalidArgumentException
-                                           code:-1
-                                       userInfo:@{NSLocalizedDescriptionKey : exception.reason}];
-      [self.delegate addressListFetcher:self didFailWithError:error];
-    } else {
-      [exception raise];
-    }
+  NSUInteger skipped = 0;
+  NSError *parseError = nil;
+  NSArray *parsed = [self.class addressesFromJSONData:data skipped:&skipped error:&parseError];
+  if (parsed == nil) {
+    [self.delegate addressListFetcher:self didFailWithError:parseError];
+    return;
   }
-
+  if (skipped > 0) {
+    WVSSLog(@"Skipped %lu non-https entries from address list", (unsigned long)skipped);
+  }
   WVSSLog(@"fetching URLS finished");
-}
-
-void expectClass(id target, Class aclass) {
-  if (![target isKindOfClass:aclass]) {
-    NSString *reason =
-        [NSString stringWithFormat:@"Expected %@ but got %@", NSStringFromClass(aclass),
-                                   NSStringFromClass([target class])];
-    NSException *exc = [NSException exceptionWithName:WVSSInvalidArgumentException
-                                               reason:reason
-                                             userInfo:nil];
-    [exc raise];
-  }
+  [self.delegate addressListFetcher:self didFinishWithArray:parsed];
 }
 
 @end
